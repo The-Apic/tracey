@@ -375,7 +375,7 @@ class QueueTable(QTableWidget):
         alpha = QTableWidgetItem(f"{job.alphamax:g}")
         alpha.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         alpha.setToolTip(
-            f"Threshold {job.threshold:.0%} · smoothness {job.alphamax:g}"
+            f"Blacklevel {job.threshold:.0%} · smoothness {job.alphamax:g}"
             f" · simplify {job.tolerance:g} · speckles {job.turdsize} px"
             + (" · clipping path" if job.clipping else "")
             + (" · inverted" if job.invert else "")
@@ -512,11 +512,11 @@ class MainWindow(QMainWindow):
             "Moves the path outwards (positive) or inwards (negative), in mask"
             " pixels.\nKeep shrinking below the radius of the tightest curve."
         )
-        self.threshold = QSpinBox()
-        self.threshold.setRange(1, 99)
-        self.threshold.setValue(50)
-        self.threshold.setSuffix(" %")
-        self.threshold.setToolTip(
+        self.blacklevel = QSpinBox()
+        self.blacklevel.setRange(1, 99)
+        self.blacklevel.setValue(50)
+        self.blacklevel.setSuffix(" %")
+        self.blacklevel.setToolTip(
             "Mask value at which a pixel counts as inside. On soft edges, lower"
             " values move the path outwards, higher ones inwards."
         )
@@ -549,7 +549,7 @@ class MainWindow(QMainWindow):
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.addRow("Threshold", self.threshold)
+        form.addRow("Blacklevel", self.blacklevel)
         form.addRow("Smoothness", self.alphamax)
         form.addRow("Simplify", self.tolerance)
         form.addRow("Speckle size", self.turdsize)
@@ -715,7 +715,7 @@ class MainWindow(QMainWindow):
                 alphamax=self.alphamax.value(),
                 turdsize=self.turdsize.value(),
                 offset=self.offset.value(),
-                threshold=self.threshold.value() / 100,
+                threshold=self.blacklevel.value() / 100,
                 tolerance=self.tolerance.value(),
                 clipping=self.clipping.isChecked(),
                 invert=self.invert.isChecked(),
