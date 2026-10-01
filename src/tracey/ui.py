@@ -9,7 +9,6 @@ from PIL import Image
 from PySide6.QtCore import QSize, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (
     QCloseEvent,
-    QColor,
     QDesktopServices,
     QDragEnterEvent,
     QDragLeaveEvent,
@@ -44,7 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tracey import APP_NAME, APP_VERSION
+from tracey import APP_NAME, APP_VERSION, theme
 from tracey.app import load_mask, trace_mask, write_svg, write_tiff
 
 IMAGE_EXTENSIONS = {".png", ".tif", ".tiff"}
@@ -121,7 +120,7 @@ class BatchWorker(QThread):
                 message = self.process(job)
             except InterruptedError:
                 self.job_finished.emit(job.id, Status.CANCELLED, "Cancelled")
-            except Exception as error:  # report any failure on the job, keep going
+            except Exception as error:  # noqa: BLE001 - report on the job, keep going
                 self.job_finished.emit(job.id, Status.FAILED, str(error) or repr(error))
             else:
                 self.job_finished.emit(job.id, Status.DONE, message)
@@ -186,8 +185,10 @@ class DropField(QFrame):
         self.setMinimumHeight(118)
 
         browse = QPushButton("Browse…")
+        browse.setProperty("role", "ghost")
         browse.clicked.connect(self.browse)
         self.clear_button = QPushButton("Clear")
+        self.clear_button.setProperty("role", "ghost")
         self.clear_button.clicked.connect(lambda: self.set_files([]))
 
         top = QHBoxLayout()
@@ -291,6 +292,15 @@ class DropField(QFrame):
         event.acceptProposedAction()
 
 
+STATUS_COLORS = {
+    Status.PENDING: "muted",
+    Status.RUNNING: "accent",
+    Status.DONE: "success",
+    Status.FAILED: "danger",
+    Status.CANCELLED: "muted",
+}
+
+
 class QueueTable(QTableWidget):
     COLUMNS = ("Beauty", "Mask", "α", "Status", "Progress")
 
@@ -301,11 +311,13 @@ class QueueTable(QTableWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setWordWrap(False)
         self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(34)
+        self.verticalHeader().setDefaultSectionSize(40)
         header = self.horizontalHeader()
         header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for column, width in ((2, 52), (3, 220), (4, 150)):
@@ -361,9 +373,7 @@ class QueueTable(QTableWidget):
             f"{job.message}\n→ {job.output}" if job.message else f"→ {job.output}"
         )
         status.setData(Qt.ItemDataRole.UserRole, job.status.name.lower())
-        status.setForeground(
-            QColor("#e5534b") if job.status is Status.FAILED else self.palette().text()
-        )
+        status.setForeground(theme.color(STATUS_COLORS[job.status]))
         bar = self.cellWidget(row, 4).findChild(QProgressBar)
         bar.setValue(job.progress)
         bar.setProperty("status", job.status.name.lower())
@@ -387,6 +397,7 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter()
         splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(12)
         splitter.addWidget(self.build_inputs())
         splitter.addWidget(self.build_queue())
         splitter.setStretchFactor(1, 1)
@@ -394,36 +405,44 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(12, 12, 12, 12)
-        content_layout.setSpacing(8)
-        content_layout.addLayout(self.build_header())
-        content_layout.addWidget(separator())
+        content_layout.setContentsMargins(16, 16, 16, 16)
         content_layout.addWidget(splitter, 1)
 
         root = QWidget()
+        root.setObjectName("root")
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
+        root_layout.addWidget(self.build_header())
         root_layout.addWidget(content, 1)
         root_layout.addWidget(self.build_footer())
         self.setCentralWidget(root)
 
         self.refresh_sources()
         self.refresh_queue()
+        QApplication.styleHints().colorSchemeChanged.connect(self.refresh_theme)
 
-    def build_header(self) -> QHBoxLayout:
+    def build_header(self) -> QFrame:
         self.run_button = QPushButton("Run Batch")
         self.run_button.setProperty("role", "accent")
         self.run_button.clicked.connect(self.run_batch)
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setProperty("role", "danger")
         self.cancel_button.clicked.connect(self.cancel_batch)
 
-        header = QHBoxLayout()
-        header.setSpacing(8)
-        header.addWidget(label(f"{APP_NAME} - {APP_VERSION}", "apptitle"))
-        header.addStretch()
+        logo = QLabel()
+        logo.setPixmap(theme.logo(32, self.devicePixelRatioF()))
+
+        header = QFrame()
+        header.setProperty("role", "topbar")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(10)
+        layout.addWidget(logo)
+        layout.addWidget(label(f"{APP_NAME} - {APP_VERSION}", "apptitle"))
+        layout.addStretch()
         for widget in (self.cancel_button, self.run_button):
-            header.addWidget(widget)
+            layout.addWidget(widget)
         return header
 
     def build_inputs(self) -> QWidget:
@@ -450,7 +469,8 @@ class MainWindow(QMainWindow):
         self.output_dir = QLineEdit()
         self.output_dir.setPlaceholderText("Next to the source files")
         output_browse = QPushButton("…")
-        output_browse.setFixedWidth(32)
+        output_browse.setProperty("role", "square")
+        output_browse.setFixedWidth(34)
         output_browse.clicked.connect(self.browse_output)
         output = QHBoxLayout()
         output.addWidget(self.output_dir, 1)
@@ -470,10 +490,12 @@ class MainWindow(QMainWindow):
         self.add_button.setProperty("role", "accent")
         self.add_button.clicked.connect(self.add_jobs)
 
-        panel = QWidget()
+        panel = QFrame()
+        panel.setProperty("role", "card")
+        panel.setMinimumWidth(360)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 8, 12, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(12)
         layout.addWidget(label("New job", "section"))
         layout.addWidget(self.beauty_field)
         layout.addWidget(self.mask_field)
@@ -495,8 +517,10 @@ class MainWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(self.open_output)
 
         self.remove_button = QPushButton("Remove")
+        self.remove_button.setProperty("role", "ghost")
         self.remove_button.clicked.connect(self.remove_selected)
         self.clear_done_button = QPushButton("Clear finished")
+        self.clear_done_button.setProperty("role", "ghost")
         self.clear_done_button.clicked.connect(self.clear_finished)
 
         top = QHBoxLayout()
@@ -506,10 +530,11 @@ class MainWindow(QMainWindow):
         top.addWidget(self.remove_button)
         top.addWidget(self.clear_done_button)
 
-        panel = QWidget()
+        panel = QFrame()
+        panel.setProperty("role", "card")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 8, 0, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 14, 16, 8)
+        layout.setSpacing(8)
         layout.addLayout(top)
         layout.addWidget(self.table, 1)
         return panel
@@ -521,15 +546,20 @@ class MainWindow(QMainWindow):
         )
         self.overall = QProgressBar()
         self.overall.setRange(0, 100)
-        self.overall.setFixedWidth(320)
-        self.overall.setFormat("%p%")
+        self.overall.setFixedWidth(280)
+        self.overall_label = label("", "muted")
+        self.overall_label.setFixedWidth(36)
+        self.overall_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.overall.valueChanged.connect(lambda v: self.overall_label.setText(f"{v}%"))
 
         footer = QFrame()
         footer.setProperty("role", "footer")
         layout = QHBoxLayout(footer)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(12)
         layout.addWidget(self.status, 1)
         layout.addWidget(self.overall)
+        layout.addWidget(self.overall_label)
         return footer
 
     # --- sources -------------------------------------------------------------
@@ -749,6 +779,10 @@ class MainWindow(QMainWindow):
 
     # --- window --------------------------------------------------------------
 
+    def refresh_theme(self) -> None:
+        for job in self.jobs:
+            self.table.update_job(job)
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -768,47 +802,10 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-STYLE = """
-QWidget { font-size: 13px; }
-QLabel[role="apptitle"] { font-size: 18px; font-weight: 600; }
-QLabel[role="section"] { font-size: 14px; font-weight: 600; }
-QLabel[role="fieldtitle"] { font-weight: 600; }
-QLabel[role="muted"] { color: palette(placeholder-text); }
-QLabel[role="error"] { color: #e5534b; }
-QLabel[role="required"], QLabel[role="optional"] {
-    border-radius: 8px; padding: 1px 7px; font-size: 11px;
-}
-QLabel[role="required"] { background: rgba(229, 83, 75, 0.16); color: #e5534b; }
-QLabel[role="optional"] { background: rgba(128, 128, 128, 0.18); color: palette(placeholder-text); }
-QLabel[role="thumbnail"] {
-    border: 1px solid palette(mid); border-radius: 6px; background: palette(base);
-    font-size: 22px; color: palette(placeholder-text);
-}
-QFrame[role="separator"] { background: palette(mid); }
-QFrame[role="footer"] { border-top: 1px solid palette(mid); }
-QFrame[role="dropfield"] {
-    border: 1px dashed palette(mid); border-radius: 8px; background: palette(alternate-base);
-}
-QFrame[role="dropfield"][hover="true"] { border: 1px solid #3b82f6; background: rgba(59, 130, 246, 0.12); }
-QPushButton { padding: 5px 12px; }
-QPushButton[role="accent"] {
-    background: #3b82f6; color: white; border: none; border-radius: 4px; padding: 6px 16px; font-weight: 600;
-}
-QPushButton[role="accent"]:hover { background: #2f6fd8; }
-QPushButton[role="accent"]:disabled { background: rgba(59, 130, 246, 0.35); color: rgba(255, 255, 255, 0.6); }
-QTableWidget { border: 1px solid palette(mid); border-radius: 6px; }
-QProgressBar { border: none; border-radius: 3px; background: rgba(128, 128, 128, 0.22); max-height: 6px; }
-QProgressBar::chunk { border-radius: 3px; background: #3b82f6; }
-QProgressBar[status="done"]::chunk { background: #2da44e; }
-QFrame[role="footer"] QProgressBar { max-height: 14px; text-align: center; font-size: 11px; }
-"""
-
-
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
+    theme.setup(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
