@@ -44,7 +44,13 @@ from PySide6.QtWidgets import (
 )
 
 from tracey import APP_NAME, APP_VERSION, theme
-from tracey.app import load_mask, trace_mask, write_svg, write_tiff
+from tracey.app import (
+    CLIPPING_PATH_NAME,
+    load_mask,
+    trace_mask,
+    write_svg,
+    write_tiff,
+)
 
 IMAGE_EXTENSIONS = {".png", ".tif", ".tiff"}
 IMAGE_FILTER = "Images (*.png *.tif *.tiff)"
@@ -96,6 +102,10 @@ class Job:
     output: Path
     alphamax: float
     turdsize: int
+    offset: float
+    threshold: float
+    tolerance: float
+    clipping: bool
     invert: bool
     svg: bool
     status: Status = Status.PENDING
@@ -137,7 +147,7 @@ class BatchWorker(QThread):
         report(0, "Loading")
         mask_image = Image.open(job.mask)
         mask_image.load()
-        mask = load_mask(mask_image, job.invert)
+        mask = load_mask(mask_image, job.invert, job.threshold)
         if not mask.any():
             raise ValueError("The mask is empty, nothing to trace")
 
@@ -156,6 +166,7 @@ class BatchWorker(QThread):
             mask,
             alphamax=job.alphamax,
             turdsize=job.turdsize,
+            tolerance=job.tolerance,
             progress=lambda f: report(5 + 85 * f, "Tracing"),
             cancelled=self.isInterruptionRequested,
         )
@@ -164,9 +175,17 @@ class BatchWorker(QThread):
 
         report(90, "Writing")
         job.output.parent.mkdir(parents=True, exist_ok=True)
-        write_tiff(image, plist, str(job.output), size=mask_image.size)
+        write_tiff(
+            image,
+            plist,
+            str(job.output),
+            size=mask_image.size,
+            offset=job.offset,
+            clipping=job.clipping,
+        )
         if job.svg:
-            write_svg(mask_image, plist, str(job.output.with_suffix(".svg")))
+            svg = str(job.output.with_suffix(".svg"))
+            write_svg(mask_image, plist, svg, offset=job.offset)
         report(100, "Done")
         return f"{len(plist)} points"
 
@@ -302,7 +321,8 @@ STATUS_COLORS = {
 
 
 class QueueTable(QTableWidget):
-    COLUMNS = ("Beauty", "Mask", "α", "Status", "Progress")
+    COLUMNS = ("Beauty", "Mask", "α", "Offset", "Status", "Progress")
+    STATUS, PROGRESS = 4, 5
 
     def __init__(self) -> None:
         super().__init__(0, len(self.COLUMNS))
@@ -322,7 +342,7 @@ class QueueTable(QTableWidget):
         )
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for column, width in ((2, 52), (3, 220), (4, 150)):
+        for column, width in ((2, 52), (3, 76), (4, 220), (5, 150)):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.setColumnWidth(column, width)
 
@@ -354,10 +374,19 @@ class QueueTable(QTableWidget):
         mask.setToolTip(str(job.mask))
         alpha = QTableWidgetItem(f"{job.alphamax:g}")
         alpha.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        alpha.setToolTip(
+            f"Threshold {job.threshold:.0%} · smoothness {job.alphamax:g}"
+            f" · simplify {job.tolerance:g} · speckles {job.turdsize} px"
+            + (" · clipping path" if job.clipping else "")
+            + (" · inverted" if job.invert else "")
+        )
         self.setItem(row, 0, beauty)
         self.setItem(row, 1, mask)
         self.setItem(row, 2, alpha)
-        self.setItem(row, 3, QTableWidgetItem())
+        offset = QTableWidgetItem(f"{job.offset:+g} px" if job.offset else "—")
+        offset.setToolTip("Grown outwards" if job.offset > 0 else "Shrunk inwards")
+        self.setItem(row, 3, offset)
+        self.setItem(row, self.STATUS, QTableWidgetItem())
         bar = QProgressBar()
         bar.setRange(0, 100)
         bar.setTextVisible(False)
@@ -365,14 +394,14 @@ class QueueTable(QTableWidget):
         inner = QHBoxLayout(container)
         inner.setContentsMargins(8, 0, 8, 0)
         inner.addWidget(bar)
-        self.setCellWidget(row, 4, container)
+        self.setCellWidget(row, self.PROGRESS, container)
         self.update_job(job)
 
     def update_job(self, job: Job, stage: str = "") -> None:
         row = self.row_of(job.id)
         if row < 0:
             return
-        status = self.cell(row, 3)
+        status = self.cell(row, self.STATUS)
         text = job.status.value
         if job.status is Status.RUNNING and stage:
             text = f"{stage} · {job.progress}%"
@@ -384,7 +413,7 @@ class QueueTable(QTableWidget):
         )
         status.setData(Qt.ItemDataRole.UserRole, job.status.name.lower())
         status.setForeground(theme.color(STATUS_COLORS[job.status]))
-        bar = self.cellWidget(row, 4).findChild(QProgressBar)
+        bar = self.cellWidget(row, self.PROGRESS).findChild(QProgressBar)
         assert bar is not None  # every row gets one in add_job
         bar.setValue(job.progress)
         bar.setProperty("status", job.status.name.lower())
@@ -465,7 +494,7 @@ class MainWindow(QMainWindow):
         self.alphamax = QDoubleSpinBox()
         self.alphamax.setRange(0, 1.34)
         self.alphamax.setSingleStep(0.05)
-        self.alphamax.setValue(1)
+        self.alphamax.setValue(0.5)
         self.alphamax.setToolTip(
             "Corner threshold: 0 gives a polygon, higher values smoother curves"
         )
@@ -474,7 +503,38 @@ class MainWindow(QMainWindow):
         self.turdsize.setValue(2)
         self.turdsize.setSuffix(" px")
         self.turdsize.setToolTip("Specks up to this area are ignored")
+        self.offset = QDoubleSpinBox()
+        self.offset.setRange(-25, 25)
+        self.offset.setDecimals(2)
+        self.offset.setSingleStep(0.25)
+        self.offset.setSuffix(" px")
+        self.offset.setToolTip(
+            "Moves the path outwards (positive) or inwards (negative), in mask"
+            " pixels.\nKeep shrinking below the radius of the tightest curve."
+        )
+        self.threshold = QSpinBox()
+        self.threshold.setRange(1, 99)
+        self.threshold.setValue(50)
+        self.threshold.setSuffix(" %")
+        self.threshold.setToolTip(
+            "Mask value at which a pixel counts as inside. On soft edges, lower"
+            " values move the path outwards, higher ones inwards."
+        )
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setRange(0, 1)
+        self.tolerance.setDecimals(2)
+        self.tolerance.setSingleStep(0.05)
+        self.tolerance.setValue(0.2)
+        self.tolerance.setToolTip(
+            "How far joined curves may stray from the mask: higher values give"
+            " fewer anchor points, 0 keeps every segment."
+        )
         self.invert = QCheckBox("Invert mask")
+        self.clipping = QCheckBox("Mark as clipping path")
+        self.clipping.setToolTip(
+            f'Saves the path as "{CLIPPING_PATH_NAME}" and makes it the clipping'
+            " path of the image, so layout apps cut the image out."
+        )
         self.svg = QCheckBox("Also write an SVG")
 
         self.output_dir = QLineEdit()
@@ -489,9 +549,13 @@ class MainWindow(QMainWindow):
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.addRow("Threshold", self.threshold)
         form.addRow("Smoothness", self.alphamax)
+        form.addRow("Simplify", self.tolerance)
         form.addRow("Speckle size", self.turdsize)
+        form.addRow("Grow / shrink", self.offset)
         form.addRow("", self.invert)
+        form.addRow("", self.clipping)
         form.addRow("", self.svg)
         form.addRow("Output folder", output)
 
@@ -650,6 +714,10 @@ class MainWindow(QMainWindow):
                 output=self.output_for(mask, beauty),
                 alphamax=self.alphamax.value(),
                 turdsize=self.turdsize.value(),
+                offset=self.offset.value(),
+                threshold=self.threshold.value() / 100,
+                tolerance=self.tolerance.value(),
+                clipping=self.clipping.isChecked(),
                 invert=self.invert.isChecked(),
                 svg=self.svg.isChecked(),
             )
