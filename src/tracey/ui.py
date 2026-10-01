@@ -56,7 +56,7 @@ def is_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTENSIONS
 
 
-def natural_key(path: Path) -> list:
+def natural_key(path: Path) -> list[int | str]:
     """Sort shot_2 before shot_10."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path.name)]
 
@@ -107,7 +107,7 @@ class BatchWorker(QThread):
     job_progress = Signal(int, int, str)  # job id, percent, stage
     job_finished = Signal(int, object, str)  # job id, Status, message
 
-    def __init__(self, jobs: list[Job]):
+    def __init__(self, jobs: list[Job]) -> None:
         super().__init__()
         self.jobs = jobs
 
@@ -176,7 +176,7 @@ class DropField(QFrame):
 
     changed = Signal()
 
-    def __init__(self, title: str, required: bool):
+    def __init__(self, title: str, required: bool) -> None:
         super().__init__()
         self.title = title
         self.files: list[Path] = []
@@ -304,7 +304,7 @@ STATUS_COLORS = {
 class QueueTable(QTableWidget):
     COLUMNS = ("Beauty", "Mask", "α", "Status", "Progress")
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(0, len(self.COLUMNS))
         self.setHorizontalHeaderLabels(self.COLUMNS)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -317,16 +317,26 @@ class QueueTable(QTableWidget):
         self.verticalHeader().setDefaultSectionSize(40)
         header = self.horizontalHeader()
         header.setHighlightSections(False)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for column, width in ((2, 52), (3, 220), (4, 150)):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.setColumnWidth(column, width)
 
+    def cell(self, row: int, column: int) -> QTableWidgetItem:
+        item = self.item(row, column)
+        assert item is not None  # add_job fills every text column
+        return item
+
+    def job_id(self, row: int) -> int:
+        return self.cell(row, 0).data(Qt.ItemDataRole.UserRole)
+
     def row_of(self, job_id: int) -> int:
         for row in range(self.rowCount()):
-            if self.item(row, 0).data(Qt.ItemDataRole.UserRole) == job_id:
+            if self.job_id(row) == job_id:
                 return row
         return -1
 
@@ -362,7 +372,7 @@ class QueueTable(QTableWidget):
         row = self.row_of(job.id)
         if row < 0:
             return
-        status = self.item(row, 3)
+        status = self.cell(row, 3)
         text = job.status.value
         if job.status is Status.RUNNING and stage:
             text = f"{stage} · {job.progress}%"
@@ -375,13 +385,14 @@ class QueueTable(QTableWidget):
         status.setData(Qt.ItemDataRole.UserRole, job.status.name.lower())
         status.setForeground(theme.color(STATUS_COLORS[job.status]))
         bar = self.cellWidget(row, 4).findChild(QProgressBar)
+        assert bar is not None  # every row gets one in add_job
         bar.setValue(job.progress)
         bar.setProperty("status", job.status.name.lower())
         repolish(bar)
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.jobs: list[Job] = []
         self.run_ids: list[int] = []
@@ -549,7 +560,9 @@ class MainWindow(QMainWindow):
         self.overall.setFixedWidth(280)
         self.overall_label = label("", "muted")
         self.overall_label.setFixedWidth(36)
-        self.overall_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.overall_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         self.overall.valueChanged.connect(lambda v: self.overall_label.setText(f"{v}%"))
 
         footer = QFrame()
@@ -653,7 +666,7 @@ class MainWindow(QMainWindow):
 
     def selected_jobs(self) -> list[Job]:
         rows = {index.row() for index in self.table.selectionModel().selectedRows()}
-        ids = {self.table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in rows}
+        ids = {self.table.job_id(row) for row in rows}
         return [j for j in self.jobs if j.id in ids]
 
     def remove_jobs(self, jobs: list[Job]) -> None:
@@ -674,7 +687,7 @@ class MainWindow(QMainWindow):
         self.remove_jobs([j for j in self.jobs if j.status is Status.DONE])
 
     def open_output(self, row: int, _column: int) -> None:
-        job = self.job(self.table.item(row, 0).data(Qt.ItemDataRole.UserRole))
+        job = self.job(self.table.job_id(row))
         folder = (
             job.output.parent
             if job.status is Status.DONE
@@ -767,6 +780,7 @@ class MainWindow(QMainWindow):
         batch = [j for j in self.jobs if j.id in self.run_ids]
         done = sum(j.status is Status.DONE for j in batch)
         failed = sum(j.status is Status.FAILED for j in batch)
+        assert self.worker is not None
         self.worker.deleteLater()
         self.worker = None
         verb = "Cancelled" if self.cancelling else "Finished"

@@ -11,7 +11,6 @@ dependencies = [
     "pillow>=12.3.0",
     "potracer>=0.0.4",
     "pyside6>=6.11.2",
-    "pyside6-stubs>=6.7.3.0",
 ]
 
 [project.scripts]
@@ -21,3 +20,28 @@ tracey = "tracey.ui:main"
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+extend-select = [
+    "ANN", # type hints on every function definition
+    "I",   # import sorting
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["T201"] # scripts report with print
+
+[dependency-groups]
+build = [
+    "pyinstaller>=6.22.3",
+]
+dev = [
+    "ruff>=0.16.9",
+    "ty>=0.0.84",
+]
+
+[tool.uv]
+default-groups = ["dev", "build"]

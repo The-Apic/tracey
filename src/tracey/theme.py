@@ -54,7 +54,14 @@ LIGHT = {
     "row-alt": "rgba(15, 23, 42, 0.022)",
 }
 
-FONTS = ["Segoe UI Variable Text", "Segoe UI", "SF Pro Text", "Inter", "Helvetica Neue", "Arial"]
+FONTS = [
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "SF Pro Text",
+    "Inter",
+    "Helvetica Neue",
+    "Arial",
+]
 
 tokens = DARK
 
@@ -79,7 +86,10 @@ def logo(size: int, ratio: float = 1) -> QPixmap:
     """In-app logo. Unlike the icon files' small sizes, it keeps the anchors."""
     pixels = round(size * ratio)
     pixmap = QPixmap(str(RESOURCES / "logo.png")).scaled(
-        pixels, pixels, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        pixels,
+        pixels,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     )
     pixmap.setDevicePixelRatio(ratio)
     return pixmap
@@ -111,7 +121,11 @@ def palette() -> QPalette:
     }
     for role, name in roles.items():
         p.setColor(role, color(name))
-    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+    ):
         p.setColor(QPalette.ColorGroup.Disabled, role, color("faint"))
     return p
 

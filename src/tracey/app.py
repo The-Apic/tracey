@@ -1,14 +1,31 @@
 import argparse
 import struct
 from collections.abc import Callable
+from typing import Protocol
 
 import numpy as np
 from PIL import Image
-from potrace import POTRACE_TURNPOLICY_MINORITY, Bitmap, Path  # `potracer` library
+from PIL.TiffImagePlugin import TiffImageFile
+from potrace import (  # `potracer` library
+    POTRACE_TURNPOLICY_MINORITY,
+    Bitmap,
+    Curve,
+    Path,
+)
 from potrace.potrace import findnext, findpath, process_path, xor_path
 
 PHOTOSHOP_TAG = 34377  # TIFF tag holding the Photoshop image resource blocks
 PATH_IDS = range(2000, 2998)  # resource ids Photoshop reserves for saved paths
+
+
+class Point(Protocol):
+    """The points potrace hands out (`potrace.potrace._Point`)."""
+
+    x: float
+    y: float
+
+
+type Knot = list[Point]  # handle in, anchor, handle out
 
 
 def trace(image: Image.Image, alphamax: float = 1) -> Path:
@@ -87,12 +104,12 @@ def trace_mask(
     return Path(paths)
 
 
-def write_svg(image: Image.Image, plist, filename: str):
+def write_svg(image: Image.Image, plist: Path, filename: str) -> None:
     with open(filename, "w") as fp:
         fp.write(
             f'''<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{image.width}" height="{image.height}" viewBox="0 0 {image.width} {image.height}">'''
         )
-        parts = []
+        parts: list[str] = []
         for curve in plist:
             fs = curve.start_point
             parts.append(f"M{fs.x},{fs.y}")
@@ -113,10 +130,11 @@ def write_svg(image: Image.Image, plist, filename: str):
         fp.write("</svg>")
 
 
-def _knots(curve):
+def _knots(curve: Curve) -> list[Knot]:
     """Photoshop stores a path as knots of (handle in, anchor, handle out)."""
     p = curve.start_point
-    knots = [[p, p, p]]
+    assert p is not None  # only empty curves lack one, potrace never returns those
+    knots: list[Knot] = [[p, p, p]]
     for segment in curve.segments:
         if segment.is_corner:
             knots.append([segment.c] * 3)
@@ -133,8 +151,8 @@ def _record(selector: int, payload: bytes = b"") -> bytes:
     return struct.pack(">H24s", selector, payload)  # always 26 bytes, zero padded
 
 
-def _path_resource(plist, width: float, height: float) -> bytes:
-    def point(p):
+def _path_resource(plist: Path, width: float, height: float) -> bytes:
+    def point(p: Point) -> bytes:
         # y before x, as 8.24 fixed point fractions of the image size
         return struct.pack(
             ">ii", round(p.y / height * (1 << 24)), round(p.x / width * (1 << 24))
@@ -159,11 +177,11 @@ def _resource_block(resource_id: int, name: str, data: bytes) -> bytes:
 
 def write_tiff(
     image: Image.Image,
-    plist,
+    plist: Path,
     filename: str,
     name: str = "Path 1",
     size: tuple[int, int] | None = None,
-):
+) -> None:
     """Save `image` as TIFF with `plist` embedded as a Photoshop path.
 
     `size` is the size of the bitmap that was traced, if it differs from the
@@ -172,7 +190,7 @@ def write_tiff(
     # keep the resources of a TIFF that already went through Photoshop
     tags = getattr(image, "tag_v2", {})
     resources = bytes(tags.get(PHOTOSHOP_TAG, b""))
-    used = image.get_photoshop_blocks() if resources else {}
+    used = image.get_photoshop_blocks() if isinstance(image, TiffImageFile) else {}
     path_id = next(i for i in PATH_IDS if i not in used)
     resources += _resource_block(
         path_id, name, _path_resource(plist, *(size or image.size))
@@ -195,7 +213,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = parse_args()
     try:
         image = Image.open(args.file)

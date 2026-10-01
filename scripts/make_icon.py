@@ -12,19 +12,24 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
+type RGB = tuple[int, int, int]
+type XY = tuple[float, float]
+
 OUT = Path(__file__).resolve().parents[1] / "src" / "tracey" / "resources"
 SS = 4  # supersampling, Pillow does not anti-alias shapes
 
-BG_TOP, BG_BOTTOM = (31, 35, 52), (12, 14, 22)
-FILL_A, FILL_B = (99, 102, 241), (34, 211, 238)  # indigo → cyan
-WHITE = (255, 255, 255)
+BG_TOP: RGB = (31, 35, 52)
+BG_BOTTOM: RGB = (12, 14, 22)
+FILL_A: RGB = (99, 102, 241)  # indigo …
+FILL_B: RGB = (34, 211, 238)  # … to cyan
+WHITE: RGB = (255, 255, 255)
 
 # the traced shape: anchors of a smooth closed path, in a 1000 unit box
-ANCHORS = [(200, 615), (370, 240), (585, 375), (805, 315), (680, 790)]
+ANCHORS: list[XY] = [(200, 615), (370, 240), (585, 375), (805, 315), (680, 790)]
 HANDLE_ANCHOR = 1  # anchor whose bezier handles are drawn
 
 
-def squircle(size: float, n: float = 5, steps: int = 720) -> list[tuple[float, float]]:
+def squircle(size: float, n: float = 5, steps: int = 720) -> list[XY]:
     r = size / 2
     t = np.linspace(0, 2 * np.pi, steps, endpoint=False)
     c, s = np.cos(t), np.sin(t)
@@ -33,7 +38,7 @@ def squircle(size: float, n: float = 5, steps: int = 720) -> list[tuple[float, f
     return list(zip(r + r * x, r + r * y))
 
 
-def gradient(size: int, a, b, angle_deg: float) -> Image.Image:
+def gradient(size: int, a: RGB, b: RGB, angle_deg: float) -> Image.Image:
     angle = np.radians(angle_deg)
     yy, xx = np.mgrid[0:size, 0:size] / max(size - 1, 1)
     t = (xx - 0.5) * np.cos(angle) + (yy - 0.5) * np.sin(angle)
@@ -42,18 +47,20 @@ def gradient(size: int, a, b, angle_deg: float) -> Image.Image:
     return Image.fromarray(rgb.astype(np.uint8), "RGB").convert("RGBA")
 
 
-def tangents(points: list[tuple[float, float]], tension: float = 0.36):
+def tangents(points: list[XY], tension: float = 0.36) -> list[XY]:
     """Catmull-Rom style tangents, scaled to bezier handle offsets."""
     n = len(points)
-    out = []
+    out: list[XY] = []
     for i in range(n):
         (px, py), (nx, ny) = points[i - 1], points[(i + 1) % n]
         out.append(((nx - px) * tension, (ny - py) * tension))
     return out
 
 
-def bezier_loop(points, handles, steps: int = 64) -> list[tuple[float, float]]:
-    pts = []
+def bezier_loop(
+    points: list[XY], handles: list[np.ndarray], steps: int = 64
+) -> list[XY]:
+    pts: list[XY] = []
     n = len(points)
     for i in range(n):
         p0, p3 = np.array(points[i]), np.array(points[(i + 1) % n])
@@ -61,7 +68,9 @@ def bezier_loop(points, handles, steps: int = 64) -> list[tuple[float, float]]:
         p2 = p3 - handles[(i + 1) % n]
         for t in np.linspace(0, 1, steps, endpoint=False):
             u = 1 - t
-            pts.append(tuple(u**3 * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t**3 * p3))
+            pts.append(
+                tuple(u**3 * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t**3 * p3)
+            )
     return pts
 
 
@@ -78,7 +87,9 @@ def artwork(size: int, detailed: bool, weight: float = 1) -> Image.Image:
     tile = gradient(big, BG_TOP, BG_BOTTOM, 90)
     # soft indigo glow behind the shape
     glow = Image.new("L", (big, big), 0)
-    ImageDraw.Draw(glow).ellipse([big * 0.18, big * 0.12, big * 0.9, big * 0.84], fill=110)
+    ImageDraw.Draw(glow).ellipse(
+        [big * 0.18, big * 0.12, big * 0.9, big * 0.84], fill=110
+    )
     glow = glow.filter(ImageFilter.GaussianBlur(big * 0.12))
     tile = Image.composite(Image.new("RGBA", (big, big), FILL_A + (255,)), tile, glow)
 
@@ -109,11 +120,15 @@ def artwork(size: int, detailed: bool, weight: float = 1) -> Image.Image:
             draw.rectangle([x - r, y - r, x + r, y + r], fill=WHITE)
             inner = r - 9 * weight * k
             color = FILL_A if i == HANDLE_ANCHOR else BG_BOTTOM
-            draw.rectangle([x - inner, y - inner, x + inner, y + inner], fill=color + (255,))
+            draw.rectangle(
+                [x - inner, y - inner, x + inner, y + inner], fill=color + (255,)
+            )
 
     # hairline highlight along the tile edge
     edge = Image.new("L", (big, big), 0)
-    ImageDraw.Draw(edge).line(squircle(big - 2 * SS) + squircle(big - 2 * SS)[:1], fill=40, width=2 * SS)
+    ImageDraw.Draw(edge).line(
+        squircle(big - 2 * SS) + squircle(big - 2 * SS)[:1], fill=40, width=2 * SS
+    )
     tile = Image.composite(Image.new("RGBA", (big, big), WHITE + (255,)), tile, edge)
 
     tile.putalpha(tile_mask)
@@ -154,7 +169,9 @@ def main() -> None:
 
     ico_sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
     frames = [windows_icon(s) for s in ico_sizes]
-    frames[-1].save(OUT / "tracey.ico", sizes=[(s, s) for s in ico_sizes], append_images=frames[:-1])
+    frames[-1].save(
+        OUT / "tracey.ico", sizes=[(s, s) for s in ico_sizes], append_images=frames[:-1]
+    )
 
     icns_frames = [macos_icon(s) for s in (32, 64, 128, 256, 512, 1024)]
     icns_frames[-1].save(OUT / "tracey.icns", append_images=icns_frames[:-1])
