@@ -39,7 +39,7 @@ uv run scripts/build.py           # add --clean to drop the build cache
 
 builds `dist/Tracey-windows-x64.exe` on Windows, and `dist/Tracey.app` plus
 `dist/Tracey-macos-arm64.zip` on macOS (PyInstaller can't cross-compile, so each is built
-on its own OS). The PyInstaller setup lives in `packaging/tracey.spec`. The GitHub workflow in
+on its own OS). All PyInstaller settings live in `scripts/build.py`. The GitHub workflow in
 `.github/workflows/build.yml` lints and type checks every push and pull request, and builds
 the Windows x64 and macOS arm64 (Apple silicon) executables for pushes to `main`, manual runs and
 `v*` tags. A tag also publishes them as a GitHub release:
