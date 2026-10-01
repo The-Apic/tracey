@@ -3,7 +3,7 @@
 Traces alpha masks into Photoshop paths with [potracer](https://pypi.org/project/potracer/)
 and embeds them into TIFFs.
 
-![screenshot](packaging/screenshot.png)
+![screenshot](docs/screenshot.png)
 
 ```
 uv run tracey                       # desktop UI
