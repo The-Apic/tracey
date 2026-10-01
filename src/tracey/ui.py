@@ -187,7 +187,7 @@ class BatchWorker(QThread):
             svg = str(job.output.with_suffix(".svg"))
             write_svg(mask_image, plist, svg, offset=job.offset)
         report(100, "Done")
-        return f"{len(plist)} points"
+        return f"{len(plist)} paths"
 
 
 class DropField(QFrame):
